@@ -12,7 +12,7 @@ map.width = 1200;
 map.height = 1200;
 const ctx = map.getContext('2d');
 
-const GTFS_RT_URL = "http://transit.api.masont.dev/vehicle_positions";
+const GTFS_RT_URL = "https://transit.api.masont.dev/vehicle_positions";
 
 // Coordinate conversion system
 class CoordinateConverter {
