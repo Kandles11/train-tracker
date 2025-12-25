@@ -1,6 +1,8 @@
 const LED_WIDTH = 64;
 const LED_HEIGHT = 128;
-const SCALE = 8;
+// TEMP: use a larger scale so the low-res grid is easier to align visually.
+const SCALE = 16;
+const SHOW_LABELS = true;
 
 const canvas = document.getElementById("matrix");
 canvas.width = LED_WIDTH * SCALE;
@@ -10,7 +12,7 @@ const ctx = canvas.getContext("2d");
 ctx.imageSmoothingEnabled = false;
 
 const bg = new Image();
-bg.src = "sf-map.png";
+bg.src = "map-north.png";
 
 bg.onload = () => {
     console.log("bg loaded");
@@ -24,7 +26,7 @@ bg.onload = () => {
 };
 
 let trains = [
-    { route: "RED", progress: 0.0, speed: 0.02 },
+    { route: "RED", progress: 0.0, speed: 0.001 },
     { route: "BLUE", progress: 0.5, speed: 0.01 }
   ];
 
@@ -38,54 +40,82 @@ function drawPixel(x, y, [r, g, b], alpha = 1.0) {
     );
   }
   
-function drawRoute(route) {
-    const { path, color } = route;
+// Build a per-pixel path for a route using the exact same stepping
+// logic as the line renderer. This is the single source of truth for
+// both drawing and train movement.
+function buildRoutePixels(route) {
+    const pixels = [];
+    const { path } = route;
+
     for (let i = 0; i < path.length - 1; i++) {
-    const [x1, y1] = path[i];
-    const [x2, y2] = path[i + 1];
+      const [x1, y1] = path[i];
+      const [x2, y2] = path[i + 1];
 
-    const dx = Math.sign(x2 - x1);
-    const dy = Math.sign(y2 - y1);
+      const dx = Math.sign(x2 - x1);
+      const dy = Math.sign(y2 - y1);
 
-    let x = x1, y = y1;
-    while (x !== x2 || y !== y2) {
-        drawPixel(x, y, color, 0.2);
+      let x = x1;
+      let y = y1;
+
+      // walk from (x1, y1) up to and including (x2, y2)
+      while (true) {
+        pixels.push([x, y]);
+        if (x === x2 && y === y2) break;
         if (x !== x2) x += dx;
         if (y !== y2) y += dy;
+      }
     }
+
+    return pixels;
+}
+
+function getRoutePixels(route) {
+    if (!route._pixels) {
+      route._pixels = buildRoutePixels(route);
+    }
+    return route._pixels;
+}
+
+function drawRoute(route) {
+    const pixels = getRoutePixels(route);
+    for (const [x, y] of pixels) {
+      drawPixel(x, y, route.color, 0.2);
     }
 }
 
+function drawStationLabels() {
+    if (!SHOW_LABELS) return;
+    ctx.save();
+    const fontSize = Math.max(10, Math.floor(SCALE * 0.9));
+    ctx.font = `${fontSize}px monospace`;
+    ctx.fillStyle = "yellow";
+    ctx.strokeStyle = "black";
+    ctx.lineWidth = 2;
+
+    for (const s of STATIONS) {
+      const screenX = s.x * SCALE;
+      const screenY = (LED_HEIGHT - 1 - s.y) * SCALE;
+      const label = s.code || s.name;
+      // slight offset so text doesn't sit directly on the dot
+      const lx = screenX + SCALE * 0.6;
+      const ly = screenY - SCALE * 0.3;
+      ctx.strokeText(label, lx, ly);
+      ctx.fillText(label, lx, ly);
+    }
+
+    ctx.restore();
+}
+
 function getPixelOnRoute(route, progress) {
-    const pts = route.path;
-    let lengths = [];
-    let total = 0;
-  
-    for (let i = 0; i < pts.length - 1; i++) {
-      const dx = pts[i+1][0] - pts[i][0];
-      const dy = pts[i+1][1] - pts[i][1];
-      const len = Math.abs(dx) + Math.abs(dy);
-      lengths.push(len);
-      total += len;
+    const pixels = getRoutePixels(route);
+    if (pixels.length === 0) {
+      return route.path[0];
     }
-  
-    let d = progress * total;
-  
-    for (let i = 0; i < lengths.length; i++) {
-      if (d <= lengths[i]) {
-        const [x1, y1] = pts[i];
-        const [x2, y2] = pts[i+1];
-        const t = d / lengths[i];
-        return [
-          Math.round(x1 + (x2 - x1) * t),
-          Math.round(y1 + (y2 - y1) * t)
-        ];
-      }
-      d -= lengths[i];
-    }
-  
-    return pts[pts.length - 1];
-  }
+
+    const idx = Math.floor(progress * pixels.length) % pixels.length;
+    return pixels[idx];
+}
+
 
   function loop() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -105,6 +135,11 @@ function getPixelOnRoute(route, progress) {
     for (const r of Object.values(routes)) {
       drawRoute(r);
     }
+
+    for (const s of STATIONS) {
+      drawPixel(s.x, s.y, [200,200,200]); // station dot
+    }
+    drawStationLabels();
   
     // update + draw trains
     for (const t of trains) {
